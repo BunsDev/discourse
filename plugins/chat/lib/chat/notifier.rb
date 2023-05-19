@@ -66,17 +66,16 @@ module Chat
     ### Public API
 
     def notify_new
-      to_notify = list_users_to_notify
-      mentioned_user_ids = to_notify.extract!(:all_mentioned_user_ids)[:all_mentioned_user_ids]
+      to_notify, all_mentioned_user_ids = list_users_to_notify
 
-      mentioned_user_ids.each do |member_id|
+      all_mentioned_user_ids.each do |member_id|
         Chat::Publisher.publish_new_mention(member_id, @chat_channel.id, @chat_message.id)
       end
 
       notify_creator_of_inaccessible_mentions(to_notify)
 
       notify_mentioned_users(to_notify)
-      notify_watching_users(except: mentioned_user_ids << @user.id)
+      notify_watching_users(except: all_mentioned_user_ids << @user.id)
 
       to_notify
     end
@@ -88,9 +87,8 @@ module Chat
           .where.not(notification: nil)
           .pluck(:user_id)
 
-      to_notify = list_users_to_notify
-      mentioned_user_ids = to_notify.extract!(:all_mentioned_user_ids)[:all_mentioned_user_ids]
-      needs_notification_ids = mentioned_user_ids - already_notified_user_ids
+      to_notify, all_mentioned_user_ids = list_users_to_notify
+      needs_notification_ids = all_mentioned_user_ids - already_notified_user_ids
       return if needs_notification_ids.blank?
 
       notify_creator_of_inaccessible_mentions(to_notify)
@@ -119,8 +117,7 @@ module Chat
 
       filter_users_ignoring_or_muting_creator(to_notify, already_covered_ids)
 
-      to_notify[:all_mentioned_user_ids] = already_covered_ids
-      to_notify
+      [to_notify, already_covered_ids]
     end
 
     def expand_global_mention(to_notify, already_covered_ids)
