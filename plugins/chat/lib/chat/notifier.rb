@@ -66,7 +66,7 @@ module Chat
     ### Public API
 
     def notify_new
-      to_notify, all_mentioned_user_ids = list_users_to_notify
+      to_notify, all_mentioned_user_ids, inaccessible = list_users_to_notify
 
       all_mentioned_user_ids.each do |member_id|
         Chat::Publisher.publish_new_mention(member_id, @chat_channel.id, @chat_message.id)
@@ -87,7 +87,7 @@ module Chat
           .where.not(notification: nil)
           .pluck(:user_id)
 
-      to_notify, all_mentioned_user_ids = list_users_to_notify
+      to_notify, all_mentioned_user_ids, inaccessible = list_users_to_notify
       needs_notification_ids = all_mentioned_user_ids - already_notified_user_ids
       return if needs_notification_ids.blank?
 
@@ -104,20 +104,21 @@ module Chat
         @chat_message.parsed_mentions.count > SiteSetting.max_mentions_per_chat_message
 
       to_notify = {}
+      inaccessible = {}
       already_covered_ids = []
 
       # The order of these methods is the precedence
       # between different mention types.
-      expand_direct_mentions(to_notify, already_covered_ids, skip_notifications)
+      expand_direct_mentions(to_notify, inaccessible, already_covered_ids, skip_notifications)
       if !skip_notifications
-        expand_group_mentions(to_notify, already_covered_ids)
+        expand_group_mentions(to_notify, inaccessible, already_covered_ids)
         expand_here_mention(to_notify, already_covered_ids)
         expand_global_mention(to_notify, already_covered_ids)
       end
 
       filter_users_ignoring_or_muting_creator(to_notify, already_covered_ids)
 
-      [to_notify, already_covered_ids]
+      [to_notify, already_covered_ids, inaccessible]
     end
 
     def expand_global_mention(to_notify, already_covered_ids)
@@ -181,7 +182,7 @@ module Chat
       }
     end
 
-    def expand_direct_mentions(to_notify, already_covered_ids, skip)
+    def expand_direct_mentions(to_notify, inaccessible, already_covered_ids, skip)
       if skip
         direct_mentions = []
       else
@@ -197,12 +198,13 @@ module Chat
       grouped = group_users_to_notify(direct_mentions)
 
       to_notify[:direct_mentions] = grouped[:already_participating].map(&:id)
-      to_notify[:welcome_to_join] = grouped[:welcome_to_join]
-      to_notify[:unreachable] = grouped[:unreachable]
       already_covered_ids.concat(to_notify[:direct_mentions])
+
+      inaccessible[:welcome_to_join] = grouped[:welcome_to_join]
+      inaccessible[:unreachable] = grouped[:unreachable]
     end
 
-    def expand_group_mentions(to_notify, already_covered_ids)
+    def expand_group_mentions(to_notify, inaccessible, already_covered_ids)
       return if @chat_message.parsed_mentions.visible_groups.empty?
 
       reached_by_group =
@@ -222,8 +224,8 @@ module Chat
       mentions_disabled =
         @chat_message.parsed_mentions.visible_groups -
           @chat_message.parsed_mentions.mentionable_groups
-      to_notify[:group_mentions_disabled] = mentions_disabled
-      to_notify[:too_many_members] = too_many_members
+      inaccessible[:group_mentions_disabled] = mentions_disabled
+      inaccessible[:too_many_members] = too_many_members
       mentionable.each { |g| to_notify[g.name.downcase] = [] }
 
       grouped = group_users_to_notify(reached_by_group)
@@ -240,8 +242,10 @@ module Chat
         already_covered_ids << user.id
       end
 
-      to_notify[:welcome_to_join] = to_notify[:welcome_to_join].concat(grouped[:welcome_to_join])
-      to_notify[:unreachable] = to_notify[:unreachable].concat(grouped[:unreachable])
+      inaccessible[:welcome_to_join] = inaccessible[:welcome_to_join].concat(
+        grouped[:welcome_to_join],
+      )
+      inaccessible[:unreachable] = inaccessible[:unreachable].concat(grouped[:unreachable])
     end
 
     def notify_creator_of_inaccessible_mentions(to_notify)
