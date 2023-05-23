@@ -248,14 +248,7 @@ module Chat
       inaccessible[:unreachable] = inaccessible[:unreachable].concat(grouped[:unreachable])
     end
 
-    def notify_creator_of_inaccessible_mentions(to_notify)
-      inaccessible =
-        to_notify.extract!(
-          :unreachable,
-          :welcome_to_join,
-          :too_many_members,
-          :group_mentions_disabled,
-        )
+    def notify_creator_of_inaccessible_mentions(inaccessible)
       return if inaccessible.values.all?(&:blank?)
 
       Chat::Publisher.publish_inaccessible_mentions(
