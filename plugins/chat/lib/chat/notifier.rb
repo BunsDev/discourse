@@ -265,20 +265,26 @@ module Chat
     # ignoring or muting the creator of the message, so they will not receive
     # a notification via the Jobs::Chat::NotifyMentioned job and are not prompted for
     # invitation by the creator.
-    def filter_users_ignoring_or_muting_creator(to_notify, already_covered_ids)
-      screen_targets = already_covered_ids.concat(to_notify[:welcome_to_join].map(&:id))
+    def filter_users_ignoring_or_muting_creator(to_notify, inaccessible, already_covered_ids)
+      screen_targets = already_covered_ids.concat(inaccessible[:welcome_to_join].map(&:id))
 
       return if screen_targets.blank?
 
       screener = UserCommScreener.new(acting_user: @user, target_user_ids: screen_targets)
-      to_notify
+      to_notify.each do |key, user_ids|
+        to_notify[key] = user_ids.reject { |user_id| screener.ignoring_or_muting_actor?(user_id) }
+      end
+
+      inaccessible
         .except(:unreachable, :welcome_to_join)
         .each do |key, user_ids|
-          to_notify[key] = user_ids.reject { |user_id| screener.ignoring_or_muting_actor?(user_id) }
+          inaccessible[key] = user_ids.reject do |user_id|
+            screener.ignoring_or_muting_actor?(user_id)
+          end
         end
 
       # :welcome_to_join contains users because it's serialized by MB.
-      to_notify[:welcome_to_join] = to_notify[:welcome_to_join].reject do |user|
+      inaccessible[:welcome_to_join] = inaccessible[:welcome_to_join].reject do |user|
         screener.ignoring_or_muting_actor?(user.id)
       end
 
